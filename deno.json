@@ -1,7 +1,10 @@
 {
+    "name": "@cappa-co/cappa-app",
     "version": "0.1.0",
+    "license": "MIT",
+    "exports": "./mod.ts",
     "fmt": {
-        "indentWidth": 4
-    },
-    "exports": "./mod.ts"
+        "indentWidth": 4,
+        "exclude": [".github/workflows/publish.yml"]
+    }
 }
