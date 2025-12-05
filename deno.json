@@ -6,5 +6,9 @@
     "fmt": {
         "indentWidth": 4,
         "exclude": [".github/workflows/publish.yml"]
+    },
+    "imports": {
+        "@std/media-types": "jsr:@std/media-types@^1.1.0",
+        "@std/path": "jsr:@std/path@^1.1.3"
     }
 }
