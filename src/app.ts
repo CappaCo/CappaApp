@@ -1,4 +1,4 @@
-import { contentType } from "@std/media-types";
+import * as mediaTypes from "@std/media-types";
 import * as path from "@std/path";
 
 interface Handler {
@@ -62,23 +62,23 @@ export class CappaApp {
             const fullPath = `${dirPath}/${entry.name}`;
             const filename = entry.name;
 
-            const route = filename.match(/^index\.(tsx|jsx|html?)$/)
-                ? baseRoute || "/"
-                : path.join(baseRoute, filename);
-
             if (entry.isDirectory) {
                 this.registerDirectory(fullPath, `${baseRoute}/${filename}`);
             } else {
+                // check if the file is an index file then make it represent the directory
+                const route = filename.match(/^index\./)
+                    ? baseRoute || "/"
+                    : path.join(baseRoute, filename);
                 this.registerFile(route, fullPath);
             }
         }
     }
 
     defaultFileServer(filePath: string): Handler {
-        return async function defaultHandleRequest () {
+        return async function defaultHandleRequest() {
             const ext = "." + filePath.split(".").pop()!;
             const data = await Deno.readFile(filePath);
-            const mime = contentType(ext) || "application/octet-stream";
+            const mime = mediaTypes.contentType(ext) || "application/octet-stream";
             console.log("ext:", ext, "mime:", mime);
 
             return new Response(data, {
