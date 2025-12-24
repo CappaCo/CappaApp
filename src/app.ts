@@ -6,7 +6,7 @@ interface Handler {
 }
 
 interface ExtensionHandler {
-    (req: Request, filePath: string): Promise<Response> | Response;
+    (filePath: string): Handler;
 }
 
 export class CappaApp {
@@ -33,19 +33,6 @@ export class CappaApp {
         const fn = this.endpoints.get(pathname);
         if (fn) return await fn(req);
 
-        // Extension-based handling
-        const ext = pathname.includes(".")
-            ? pathname.slice(pathname.lastIndexOf("."))
-            : "";
-
-        const extHandler = this.extensionMap.get(ext);
-        if (extHandler) {
-            const filePath = pathname.startsWith("/")
-                ? pathname.slice(1)
-                : pathname;
-            return await extHandler(req, filePath);
-        }
-
         return new Response("Not Found", { status: 404 });
     }
 
@@ -64,21 +51,9 @@ export class CappaApp {
 
         if (extHandler) {
             // wrap extension handler into endpoint handler
-            this.registerEndpoint(route, (req) =>
-                extHandler(req, filePath)
-            );
+            this.registerEndpoint(route, extHandler(filePath));
         } else {
-            this.registerEndpoint(route, async function defaultFileServer() {
-                const data = await Deno.readFile(filePath);
-                const mime = contentType(ext) || "application/octet-stream";
-                console.log("ext:", ext, "mime:", mime);
-
-                return new Response(data, {
-                    headers: {
-                        "Content-Type": mime,
-                    },
-                });
-            });
+            this.registerEndpoint(route, this.defaultFileServer(filePath));
         }
     }
 
@@ -87,10 +62,9 @@ export class CappaApp {
             const fullPath = `${dirPath}/${entry.name}`;
             const filename = entry.name;
 
-            const route =
-                filename.match(/^index\.(tsx|jsx|html?)$/)
-                    ? baseRoute || "/"
-                    : path.join(baseRoute, filename);
+            const route = filename.match(/^index\.(tsx|jsx|html?)$/)
+                ? baseRoute || "/"
+                : path.join(baseRoute, filename);
 
             if (entry.isDirectory) {
                 this.registerDirectory(fullPath, `${baseRoute}/${filename}`);
@@ -98,5 +72,20 @@ export class CappaApp {
                 this.registerFile(route, fullPath);
             }
         }
+    }
+
+    defaultFileServer(filePath: string): Handler {
+        return async function defaultHandleRequest () {
+            const ext = "." + filePath.split(".").pop()!;
+            const data = await Deno.readFile(filePath);
+            const mime = contentType(ext) || "application/octet-stream";
+            console.log("ext:", ext, "mime:", mime);
+
+            return new Response(data, {
+                headers: {
+                    "Content-Type": mime,
+                },
+            });
+        };
     }
 }
