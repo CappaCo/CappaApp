@@ -9,7 +9,18 @@ interface ExtensionHandler {
     (filePath: string): Handler;
 }
 
+function joinRoute(base: string, part: string) {
+    return (
+        "/" +
+        [base, part]
+            .map((s) => s.replace(/^\/+|\/+$/g, ""))
+            .filter(Boolean)
+            .join("/")
+    );
+}
+
 export class CappaApp {
+    server: Deno.HttpServer | undefined;
     port: number;
     endpoints: Map<string, Handler>;
     extensionMap: Map<string, ExtensionHandler>;
@@ -21,20 +32,37 @@ export class CappaApp {
     }
 
     start(): Promise<void> {
-        return new Promise((resolve) => {
-            Deno.serve({
-                port: this.port,
-                onListen: () => {
-                    console.log(`CappaApp listening on port ${this.port}`);
-                    resolve();
-                },
-            }, this.handleRequest.bind(this));
+        return new Promise((resolve, reject) => {
+            try {
+                this.server = Deno.serve(
+                    {
+                        port: this.port,
+                        onListen: () => {
+                            console.log(
+                                `CappaApp listening on port ${this.port}`,
+                            );
+                            resolve();
+                        },
+                    },
+                    this.handleRequest.bind(this),
+                );
+            } catch (err) {
+                reject(err);
+            }
         });
     }
 
+    async stop(): Promise<void> {
+        if (!this.server) {
+            console.warn("no server to stop");
+            return;
+        }
+        await this.server.shutdown();
+        this.server = undefined;
+    }
+
     async handleRequest(req: Request): Promise<Response> {
-        const url = new URL(req.url);
-        const pathname = url.pathname;
+        const pathname = this.normalizeRoute(new URL(req.url).pathname);
 
         // Exact endpoint match
         const fn = this.endpoints.get(pathname);
@@ -44,6 +72,7 @@ export class CappaApp {
     }
 
     registerEndpoint(route: string, handler: Handler) {
+        route = this.normalizeRoute(route);
         this.endpoints.set(route, handler);
     }
 
@@ -53,8 +82,12 @@ export class CappaApp {
     }
 
     registerFile(route: string, filePath: string) {
-        const ext = "." + filePath.split(".").pop()!;
-        const extHandler = this.extensionMap.get(ext);
+        if (this.endpoints.has(route)) {
+            console.warn(`overwriting route: ${route}`);
+        }
+
+        const ext = path.extname(filePath);
+        const extHandler = ext ? this.extensionMap.get(ext) : undefined;
 
         if (extHandler) {
             // wrap extension handler into endpoint handler
@@ -66,34 +99,78 @@ export class CappaApp {
 
     registerDirectory(dirPath: string, baseRoute = "/") {
         for (const entry of Deno.readDirSync(dirPath)) {
-            const fullPath = `${dirPath}/${entry.name}`;
+            const fullPath = path.join(dirPath, entry.name);
+
+            const resolved = path.resolve(fullPath);
+            const root = path.resolve(dirPath);
+
+            if (!resolved.startsWith(root)) continue;
+
             const filename = entry.name;
 
             if (entry.isDirectory) {
-                this.registerDirectory(fullPath, `${baseRoute}/${filename}`);
+                this.registerDirectory(
+                    fullPath,
+                    joinRoute(baseRoute, filename),
+                );
             } else {
-                // check if the file is an index file then make it represent the directory
-                const route = filename.match(/^index\./)
-                    ? baseRoute || "/"
-                    : path.join(baseRoute, filename);
-                this.registerFile(route, fullPath);
+                if (filename.match(/^index\./)) {
+                    this.registerFile(baseRoute || "/", fullPath);
+                } else {
+                    this.registerFile(joinRoute(baseRoute, filename), fullPath);
+                }
             }
         }
     }
 
     defaultFileServer(filePath: string): Handler {
-        return async function defaultHandleRequest() {
-            const ext = "." + filePath.split(".").pop()!;
-            const data = await Deno.readFile(filePath);
-            const mime = mediaTypes.contentType(ext) ||
-                "application/octet-stream";
-            console.log("ext:", ext, "mime:", mime);
+        return async function defaultHandleRequest(req) {
+            try {
+                const stat = await Deno.stat(filePath);
+                const file = await Deno.open(filePath);
 
-            return new Response(data, {
-                headers: {
+                const mime = mediaTypes.contentType(path.extname(filePath)) ||
+                    "application/octet-stream";
+                const headers = {
                     "Content-Type": mime,
-                },
-            });
+                    "Content-Length": stat.size.toString(),
+                };
+
+                if (req.method == "GET") {
+                    return new Response(file.readable, {
+                        headers,
+                    });
+                }
+                if (req.method == "HEAD") {
+                    return new Response(null, {
+                        headers,
+                    });
+                }
+
+                return new Response("405: method not allowed", {
+                    status: 405,
+                    headers: {
+                        "Allow": "GET, HEAD",
+                        "Content-Type": "text/plain",
+                    },
+                });
+            } catch (err) {
+                if (err instanceof Deno.errors.NotFound) {
+                    return new Response("404: not found", { status: 404 });
+                }
+                console.error(err);
+                return new Response("500: internal server error", {
+                    status: 500,
+                });
+            }
         };
+    }
+
+    normalizeRoute(route: string): string {
+        if (!route.startsWith("/")) route = "/" + route;
+        if (route.length > 1 && route.endsWith("/")) {
+            route = route.slice(0, -1);
+        }
+        return route;
     }
 }
