@@ -57,7 +57,7 @@ export class CappaApp {
         }
     }
 
-    registerDirectory(dirPath: string, baseRoute = "") {
+    registerDirectory(dirPath: string, baseRoute = "/") {
         for (const entry of Deno.readDirSync(dirPath)) {
             const fullPath = `${dirPath}/${entry.name}`;
             const filename = entry.name;
