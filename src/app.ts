@@ -20,9 +20,16 @@ export class CappaApp {
         this.extensionMap = new Map();
     }
 
-    start() {
-        console.log(`CappaApp listening on port ${this.port}`);
-        Deno.serve({ port: this.port }, this.handleRequest.bind(this));
+    start(): Promise<void> {
+        return new Promise((resolve) => {
+            Deno.serve({
+                port: this.port,
+                onListen: () => {
+                    console.log(`CappaApp listening on port ${this.port}`);
+                    resolve();
+                },
+            }, this.handleRequest.bind(this));
+        });
     }
 
     async handleRequest(req: Request): Promise<Response> {
@@ -78,7 +85,8 @@ export class CappaApp {
         return async function defaultHandleRequest() {
             const ext = "." + filePath.split(".").pop()!;
             const data = await Deno.readFile(filePath);
-            const mime = mediaTypes.contentType(ext) || "application/octet-stream";
+            const mime = mediaTypes.contentType(ext) ||
+                "application/octet-stream";
             console.log("ext:", ext, "mime:", mime);
 
             return new Response(data, {
